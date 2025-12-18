@@ -11,6 +11,8 @@ import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.util.List;
 
 public class Bot extends TelegramLongPollingBot {
@@ -60,7 +62,7 @@ public class Bot extends TelegramLongPollingBot {
 
     public void initDBConnection() {
         try {
-            String url = "jdbc:mysql://localhost:3306/shoe_store_bot";
+            String url = "jdbc:mysql://localhost:3306/estate_bot";
             String username = "root";
             String password = "andrEj0077";
 
@@ -180,22 +182,21 @@ public class Bot extends TelegramLongPollingBot {
 
             System.out.println("current callback: " + callbackData);
 
-            //Для отправки текста
-            EditMessageText editMessageText = EditMessageText.builder()
-                    .chatId(chatId)
-                    .messageId(messageId)
-                    .text("")
-                    .build();
-
             if (callbackData.equals(buttonForCreateCustomer.getCallbackData())) {
                 isCreateCustomer = true;
                 isWaitingName = true;
-                editMessageText.setText("Создание клиента: \nВведите имя:");
+
+                EditMessageText editMsg = EditMessageText.builder()
+                        .chatId(chatId)
+                        .messageId(messageId)
+                        .text("Создание клиента: \nВведите имя:")
+                        .build();
                 try {
-                    execute(editMessageText);
+                    execute(editMsg);
                 } catch (Exception ex) {
-                    System.out.println(ex.getMessage());
+                    System.out.println("Ошибка при редактировании сообщения: " + ex.getMessage());
                 }
+
             } else if (callbackData.equals("ATELIER") ||
                     callbackData.equals("ONE_ROOM_APARTMENT") ||
                     callbackData.equals("TWO_ROOM_APARTMENT") ||
@@ -210,30 +211,64 @@ public class Bot extends TelegramLongPollingBot {
                     Customers customer = new Customers(name, phoneNumber, cityForBuyEstate, typeOfEstate);
                     System.out.println(customer);
 
+                    String sql = "INSERT INTO customers (name, phone_number, city_for_buy_estate, type_of_estate) " +
+                            "VALUES (?, ?, ?, ?)";
 
+                    System.out.println("Выполняем SQL: " + sql);
 
-                    editMessageText.setText("Клиент создан!\n" + customer.toString() + "\n\nГлавное меню:");
-                    editMessageText.setReplyMarkup(keyboardForMainMenu);
+                    String resultMessage = "";
+
                     try {
-                        execute(editMessageText);
+                        if (connection != null && !connection.isClosed()) {
+                            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+
+                                ps.setString(1, name);
+                                // Исправленная строка - используем setString вместо setLong
+                                ps.setString(2, phoneNumber != null ? phoneNumber.toString() : null);
+                                ps.setString(3, cityForBuyEstate);
+                                ps.setString(4, typeOfEstate);
+
+                                int rowsAffected = ps.executeUpdate();
+                                if (rowsAffected > 0) {
+                                    resultMessage = "✅ Клиент успешно добавлен в базу данных!\n\n";
+                                } else {
+                                    resultMessage = "❌ Ошибка при добавлении клиента!\n\n";
+                                }
+                            }
+                        } else {
+                            resultMessage = "❌ Нет соединения с базой данных!\n\n";
+                        }
+                    } catch (SQLException ex) {
+                        System.out.println("Ошибка при добавлении клиента: " + ex.getMessage());
+
+                        if (ex.getMessage().contains("Duplicate entry")) {
+                            resultMessage = "❌ Ошибка: Клиент с таким номером телефона уже существует!\n\n";
+                        } else {
+                            resultMessage = "❌ Ошибка базы данных: " + ex.getMessage() + "\n\n";
+                        }
                     } catch (Exception ex) {
-                        System.out.println(ex.getMessage());
+                        System.out.println("Ошибка при добавлении клиента: " + ex.getMessage());
+                        ex.printStackTrace();
+                        resultMessage = "❌ Ошибка: " + ex.getMessage() + "\n\n";
                     }
-                }
-            } else if (callbackData.equals("back")) {
-                resetIs();
-                editMessageText.setText("Добро пожаловать в телеграм бот для риелторов");
-                editMessageText.setReplyMarkup(keyboardForMainMenu);
-                try {
-                    execute(editMessageText);
-                } catch (Exception ex) {
-                    System.out.println(ex.getMessage());
+                    EditMessageText finalMessage = EditMessageText.builder()
+                            .chatId(chatId)
+                            .messageId(messageId)
+                            .text(resultMessage + "Клиент создан!\n" + customer + "\n\nГлавное меню:")
+                            .replyMarkup(keyboardForMainMenu)
+                            .build();
+
+                    try {
+                        execute(finalMessage);
+                    } catch (Exception ex) {
+                        System.out.println("Ошибка при отправке финального сообщения: " + ex.getMessage());
+                    }
                 }
             }
         }
     }
 
-    private void resetIs(){
+    private void resetIs() {
         isCreateCustomer = false;
         isWaitingName = false;
         isWaitingPhone = false;
