@@ -9,11 +9,10 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMa
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.SQLException;
+import java.sql.*;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class Bot extends TelegramLongPollingBot {
     private Connection connection;
@@ -23,11 +22,15 @@ public class Bot extends TelegramLongPollingBot {
     private boolean isWaitingPhone = false;
     private boolean isWaitingCity = false;
     private boolean isWaitingType = false;
+    private boolean isWaitingId = false;
 
     private String name;
     private Long phoneNumber;
     private String cityForBuyEstate;
     private String typeOfEstate;
+    private int customerId;
+
+    Map<Integer, Customers> mapCustomer = new HashMap<>();
 
     // Кнопка для создания клиента
     InlineKeyboardButton buttonForCreateCustomer = InlineKeyboardButton.builder()
@@ -73,6 +76,16 @@ public class Bot extends TelegramLongPollingBot {
         }
     }
 
+    private void mainMenu(SendMessage sendMessage) {
+        sendMessage.setText("Добро пожаловать в телеграм бот для риелторов");
+        sendMessage.setReplyMarkup(keyboardForMainMenu);
+        try {
+            execute(sendMessage);
+        } catch (Exception ex) {
+            System.out.println(ex.getMessage());
+        }
+    }
+
     public void forWorkWithText(Update update) {
         if (update.hasMessage() && update.getMessage().hasText()) {
             String chatId = update.getMessage().getChatId().toString();
@@ -91,13 +104,8 @@ public class Bot extends TelegramLongPollingBot {
                 isWaitingPhone = false;
                 isWaitingCity = false;
                 isWaitingType = false;
-                sendMessage.setText("Добро пожаловать в телеграм бот для риелторов");
-                sendMessage.setReplyMarkup(keyboardForMainMenu);
-                try {
-                    execute(sendMessage);
-                } catch (Exception ex) {
-                    System.out.println(ex.getMessage());
-                }
+                isWaitingId = false;
+                mainMenu(sendMessage);
                 return;
             }
 
@@ -170,9 +178,34 @@ public class Bot extends TelegramLongPollingBot {
                 } catch (Exception ex) {
                     System.out.println(ex.getMessage());
                 }
+            } else if (isWaitingId) {
+                customerId = Integer.parseInt(textMessage);
+                for (Map.Entry map : mapCustomer.entrySet()) {
+                    if (map.getKey().equals(customerId)) {
+
+                        System.out.println(map + "\n\n");
+                        InlineKeyboardButton buttonForSetTime = InlineKeyboardButton.builder()
+                                .text("Выбрать время")
+                                .callbackData("choice_time")
+                                .build();
+                        InlineKeyboardMarkup keyboardForTime = InlineKeyboardMarkup.builder()
+                                .keyboardRow(List.of(buttonForSetTime))
+                                .keyboardRow(List.of(buttonForReturnBack))
+                                .build();
+
+                        sendMessage.setText(map + "\n\nВведите ID клиента:");
+                        sendMessage.setReplyMarkup(keyboardForTime);
+                        try{
+                            execute(sendMessage);
+                        }catch (Exception ex){
+                            System.out.println(ex.getMessage());
+                        }
+                    }
+                }
             }
         }
     }
+
 
     public void forWorkWithButtons(Update update) {
         if (update.hasCallbackQuery()) {
@@ -182,19 +215,31 @@ public class Bot extends TelegramLongPollingBot {
 
             System.out.println("current callback: " + callbackData);
 
+            SendMessage sendMessage = SendMessage.builder()
+                    .chatId(chatId)
+                    .text("")
+                    .build();
+
             if (callbackData.equals(buttonForCreateCustomer.getCallbackData())) {
                 isCreateCustomer = true;
                 isWaitingName = true;
 
-                EditMessageText editMsg = EditMessageText.builder()
-                        .chatId(chatId)
-                        .messageId(messageId)
-                        .text("Создание клиента: \nВведите имя:")
-                        .build();
+                sendMessage.setText("Создание клиента: \nВведите имя:");
                 try {
-                    execute(editMsg);
+                    execute(sendMessage);
                 } catch (Exception ex) {
                     System.out.println("Ошибка при редактировании сообщения: " + ex.getMessage());
+                }
+
+            } else if (callbackData.equals(buttonForQuestionableCustomers.getCallbackData())) {
+
+                String finalMessage = getAllCustomersFromDB();
+                sendMessage.setText(finalMessage + "\n\nВведите id клиента, которого хотите выбрать:");
+                isWaitingId = true;
+                try {
+                    execute(sendMessage);
+                } catch (Exception ex) {
+                    System.out.println(ex.getMessage());
                 }
 
             } else if (callbackData.equals("ATELIER") ||
@@ -248,7 +293,7 @@ public class Bot extends TelegramLongPollingBot {
                         }
                     } catch (Exception ex) {
                         System.out.println("Ошибка при добавлении клиента: " + ex.getMessage());
-                        ex.printStackTrace();
+                        System.out.println(ex.getMessage());
                         resultMessage = "❌ Ошибка: " + ex.getMessage() + "\n\n";
                     }
                     EditMessageText finalMessage = EditMessageText.builder()
@@ -264,8 +309,59 @@ public class Bot extends TelegramLongPollingBot {
                         System.out.println("Ошибка при отправке финального сообщения: " + ex.getMessage());
                     }
                 }
+            } else if (callbackData.equals(buttonForReturnBack.getCallbackData())) {
+                mainMenu(sendMessage);
             }
         }
+    }
+
+    private String getAllCustomersFromDB() {
+        StringBuilder result = new StringBuilder();
+        String sql = "SELECT id, name, phone_number, city_for_buy_estate, type_of_estate FROM customers ORDER BY id ASC";
+
+        try {
+            if (connection != null && !connection.isClosed()) {
+                try (PreparedStatement ps = connection.prepareStatement(sql);
+                     ResultSet rs = ps.executeQuery()) {
+
+                    result.append("📋 Список всех клиентов:\n\n");
+
+                    int count = 0;
+                    while (rs.next()) {
+                        count++;
+                        int id = rs.getInt("id");
+                        String name = rs.getString("name");
+                        String phone = rs.getString("phone_number");
+                        String city = rs.getString("city_for_buy_estate");
+                        String type = rs.getString("type_of_estate");
+                        Customers customer = new Customers(name, Long.parseLong(phone), city, type);
+                        mapCustomer.put(count, customer);
+
+                        result.append(String.format("Клиент #%d:\n", count));
+                        result.append(String.format("  ID: %d\n", id));
+                        result.append(String.format("  Имя: %s\n", name != null ? name : "Не указано"));
+                        result.append(String.format("  Телефон: %s\n", phone != null ? phone : "Не указан"));
+                        result.append(String.format("  Город: %s\n", city != null ? city : "Не указан"));
+                        result.append(String.format("  Тип недвижимости: %s\n", type != null ? type : "Не указан"));
+                        result.append("────────────────────\n");
+                    }
+
+                    if (count == 0) {
+                        result.append("Клиентов пока нет в базе данных.");
+                    } else {
+                        result.append(String.format("\nВсего клиентов: %d", count));
+                    }
+
+                }
+            } else {
+                result.append("❌ Нет соединения с базой данных!");
+            }
+        } catch (SQLException ex) {
+            System.out.println("Ошибка при получении клиентов: " + ex.getMessage());
+            result.append("❌ Ошибка при получении данных из базы!");
+        }
+
+        return result.toString();
     }
 
     private void resetIs() {
