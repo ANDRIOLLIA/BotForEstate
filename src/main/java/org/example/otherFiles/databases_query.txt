@@ -3,6 +3,8 @@ id INT AUTO_INCREMENT PRIMARY KEY,
 name TEXT,
 phone_number VARCHAR(15),
 city_for_buy_estate VARCHAR(30),
-type_of_estate VARCHAR(50)
+type_of_estate VARCHAR(50),
+time_of_create_query DATETIME,
+time_to_contact DATETIME
 );
 
